@@ -1,35 +1,64 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
-	"io"
+	"github.com/tidwall/gjson"
+	"log"
 	"net"
-	"os"
 )
 
-func handleGzip(conn net.PacketConn, sendAddr net.Addr, buf []byte, recvAddr net.Addr) error {
-	// create a reader
-	r, err := gzip.NewReader(bytes.NewBuffer(buf))
-	defer r.Close()
+// decompress, handle it
+// WARN: buf is a copy, do anything you want
+// WANR: this func will run in a go routine
+func handleGzip(sendAddr net.Addr, buf []byte, recvAddr net.Addr) {
+	// create a gzip.Reader
+	gr, err := gzip.NewReader(bytes.NewBuffer(buf))
+	defer gr.Close()
 
-	//DEBUG: output to stdout
-	if err == nil {
-		io.Copy(os.Stdout, r)
+	if err != nil {
+		log.Println("failed to create gzip reader")
+		return
 	}
 
-	// extract short_message
+	// create a bufio.Reader over gzip.Reader
+	r := bufio.NewReader(gr)
 
-	//DEBUG: just relay to target
-	conn.WriteTo(buf, sendAddr)
+	// read the string
+	s, _ := r.ReadString(0)
 
-	return nil
+	// parse json
+	m, ok := gjson.Parse(s).Value().(map[string]interface{})
+
+	if !ok {
+		log.Println("failed to parse GELF json:", s)
+		return
+	}
+
+	// find cid
+	cid, ok := m[kContainerId].(string)
+
+	if len(cid) == 0 {
+		// container_id not found, just relay
+		_, err := sendPacket(buf)
+		if err != nil {
+			log.Println("failed to relay gzip message")
+			log.Println(err)
+		}
+	} else {
+		// dispatch message to sessions
+		dispatchMessageToSessions(m)
+	}
 }
 
 // for format other than gzip, just relay
-func handleUnknown(conn net.PacketConn, sendAddr net.Addr, buf []byte, recvAddr net.Addr) {
-	// make a local copy, since 'buf' is a subslice of shared slice
-	local := make([]byte, len(buf))
-	copy(buf, local)
-	go conn.WriteTo(local, sendAddr)
+// WARN: buf is a copy, do anything you want
+// WANR: this func will run in a go routine
+func handleWild(sendAddr net.Addr, buf []byte, recvAddr net.Addr) {
+	_, err := sendPacket(buf)
+	if err != nil {
+		log.Println("failed to relay wild message")
+		log.Println(err)
+	}
 }
