@@ -6,7 +6,7 @@ import "log"
 
 var PacketMaxSize = 8 * 1024 // max bytes in a single UDP packet
 
-var bindOption = flag.String("b", "127.0.0.1:12201", "bind address")
+var bindOption = flag.String("b", "0.0.0.0:12201", "bind address")
 var trgtOption = flag.String("t", "127.0.0.1:12202", "target address")
 var ruleOption = flag.String("r", "W", "rules")
 
